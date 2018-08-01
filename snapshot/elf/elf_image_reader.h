@@ -118,7 +118,13 @@ class ElfImageReader {
   //! \param[in] memory A memory reader for the remote process.
   //! \param[in] address The address in the remote process' address space where
   //!     the ELF image is loaded.
-  bool Initialize(const ProcessMemoryRange& memory, VMAddress address);
+  //! \param[in] verbose `true` if this method should log error messages during
+  //!     initialization. Setting this value to `false` will reduce the error
+  //!     messages relating to verifying the ELF image, but may not suppress
+  //!     logging entirely.
+  bool Initialize(const ProcessMemoryRange& memory,
+                  VMAddress address,
+                  bool verbose = true);
 
   //! \brief Returns the base address of the image's memory range.
   //!
@@ -172,6 +178,16 @@ class ElfImageReader {
   //! \return `true` if the debug address was found.
   bool GetDebugAddress(VMAddress* debug);
 
+  //! \brief Determine the address of `PT_DYNAMIC` segment.
+  //!
+  //! \param[out] address The address of the array, valid if this method returns
+  //!     `true`.
+  //! \return `true` on success. Otherwise `false` with a message logged.
+  bool GetDynamicArrayAddress(VMAddress* address);
+
+  //! \brief Return the address of the program header table.
+  VMAddress GetProgramHeaderTableAddress();
+
   //! \brief Return a NoteReader for this image, which scans all PT_NOTE
   //!     segments in the image.
   //!
@@ -207,14 +223,41 @@ class ElfImageReader {
   //! The caller does not take ownership of the returned object.
   const ProcessMemoryRange* Memory() const;
 
+  //! \brief Retrieves the number of symbol table entries in `DT_SYMTAB`
+  //!     according to the data in the `DT_HASH` section.
+  //!
+  //! \note Exposed for testing, not normally otherwise useful.
+  //!
+  //! \param[out] number_of_symbol_table_entries The number of entries expected
+  //!     in `DT_SYMTAB`.
+  //! \return `true` if a `DT_HASH` section was found, and was read
+  //!     successfully, otherwise `false` with an error logged.
+  bool GetNumberOfSymbolEntriesFromDtHash(
+      VMSize* number_of_symbol_table_entries);
+
+  //! \brief Retrieves the number of symbol table entries in `DT_SYMTAB`
+  //!     according to the data in the `DT_GNU_HASH` section.
+  //!
+  //! \note Exposed for testing, not normally otherwise useful.
+  //!
+  //! \note Depending on the linker that generated the `DT_GNU_HASH` section,
+  //!     this value may not be as expected if there are zero exported symbols.
+  //!
+  //! \param[out] number_of_symbol_table_entries The number of entries expected
+  //!     in `DT_SYMTAB`.
+  //! \return `true` if a `DT_GNU_HASH` section was found, and was read
+  //!     successfully, otherwise `false` with an error logged.
+  bool GetNumberOfSymbolEntriesFromDtGnuHash(
+      VMSize* number_of_symbol_table_entries);
+
  private:
   template <typename PhdrType>
   class ProgramHeaderTableSpecific;
 
-  bool InitializeProgramHeaders();
+  bool InitializeProgramHeaders(bool verbose);
   bool InitializeDynamicArray();
   bool InitializeDynamicSymbolTable();
-  bool GetAddressFromDynamicArray(uint64_t tag, VMAddress* address);
+  bool GetAddressFromDynamicArray(uint64_t tag, bool log, VMAddress* address);
 
   union {
     Elf32_Ehdr header_32_;
