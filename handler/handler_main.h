@@ -16,9 +16,24 @@
 #define CRASHPAD_HANDLER_HANDLER_MAIN_H_
 
 #include "handler/user_stream_data_source.h"
+#include "base/macros.h"
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+	#include <windows.h>
+#endif
 
 namespace crashpad {
 
+#if defined(OS_MACOSX)
+	#error Not implemented
+#elif defined(OS_WIN)
+	typedef void (*OnCrashDumpEventCallback)(HANDLE process, unsigned int exit_code);
+#elif defined(OS_FUCHSIA)
+	#error Not implemented
+#else
+	#error Not implemented
+#endif
 //! \brief The `main()` of the `crashpad_handler` binary.
 //!
 //! This is exposed so that `crashpad_handler` can be embedded into another
@@ -32,7 +47,8 @@ namespace crashpad {
 //!     to the minidump.
 int HandlerMain(int argc,
                 char* argv[],
-                const UserStreamDataSources* user_stream_sources);
+                const UserStreamDataSources* user_stream_sources,
+				OnCrashDumpEventCallback crash_dump_callback = nullptr);
 
 }  // namespace crashpad
 

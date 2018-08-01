@@ -36,6 +36,8 @@ class ClientData;
 //!     process.
 class ExceptionHandlerServer {
  public:
+  typedef void (*OnCrashDumpEventCallback)(HANDLE process, unsigned int exit_code);
+
   class Delegate {
    public:
     //! \brief Called when the server has created the named pipe connection
@@ -68,7 +70,7 @@ class ExceptionHandlerServer {
   //! \param[in] persistent `true` if Run() should not return until Stop() is
   //!     called. If `false`, Run() will return when all clients have exited,
   //!     although Run() will always wait for the first client to connect.
-  explicit ExceptionHandlerServer(bool persistent);
+  explicit ExceptionHandlerServer(bool persistent, OnCrashDumpEventCallback crash_dump_callback = nullptr);
 
   ~ExceptionHandlerServer();
 
@@ -131,6 +133,8 @@ class ExceptionHandlerServer {
   std::set<internal::ClientData*> clients_;
 
   bool persistent_;
+
+  OnCrashDumpEventCallback crash_dump_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(ExceptionHandlerServer);
 };

@@ -68,18 +68,21 @@ namespace internal {
 //! \brief Context information for the named pipe handler threads.
 class PipeServiceContext {
  public:
+  typedef void (*OnCrashDumpEventCallback)(HANDLE process, unsigned int exit_code);
   PipeServiceContext(HANDLE port,
                      HANDLE pipe,
                      ExceptionHandlerServer::Delegate* delegate,
                      base::Lock* clients_lock,
                      std::set<internal::ClientData*>* clients,
-                     uint64_t shutdown_token)
+                     uint64_t shutdown_token,
+					 OnCrashDumpEventCallback crash_dump_callback)
       : port_(port),
         pipe_(pipe),
         delegate_(delegate),
         clients_lock_(clients_lock),
         clients_(clients),
-        shutdown_token_(shutdown_token) {}
+        shutdown_token_(shutdown_token),
+		crash_dump_callback_(crash_dump_callback) {}
 
   HANDLE port() const { return port_; }
   HANDLE pipe() const { return pipe_.get(); }
@@ -87,6 +90,7 @@ class PipeServiceContext {
   base::Lock* clients_lock() const { return clients_lock_; }
   std::set<internal::ClientData*>* clients() const { return clients_; }
   uint64_t shutdown_token() const { return shutdown_token_; }
+  OnCrashDumpEventCallback crash_dump_callback() const { return crash_dump_callback_; }
 
  private:
   HANDLE port_;  // weak
@@ -95,6 +99,7 @@ class PipeServiceContext {
   base::Lock* clients_lock_;  // weak
   std::set<internal::ClientData*>* clients_;  // weak
   uint64_t shutdown_token_;
+  OnCrashDumpEventCallback crash_dump_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(PipeServiceContext);
 };
@@ -106,6 +111,7 @@ class PipeServiceContext {
 //! variables which are accessed only by the main thread.
 class ClientData {
  public:
+  typedef void (*OnCrashDumpEventCallback)(HANDLE process, unsigned int exit_code);
   ClientData(HANDLE port,
              ExceptionHandlerServer::Delegate* delegate,
              ScopedKernelHANDLE process,
@@ -117,7 +123,8 @@ class ClientData {
              WinVMAddress debug_critical_section_address,
              WAITORTIMERCALLBACK crash_dump_request_callback,
              WAITORTIMERCALLBACK non_crash_dump_request_callback,
-             WAITORTIMERCALLBACK process_end_callback)
+             WAITORTIMERCALLBACK process_end_callback,
+			 OnCrashDumpEventCallback crash_dump_callback)
       : crash_dump_request_thread_pool_wait_(INVALID_HANDLE_VALUE),
         non_crash_dump_request_thread_pool_wait_(INVALID_HANDLE_VALUE),
         process_end_thread_pool_wait_(INVALID_HANDLE_VALUE),
@@ -134,7 +141,8 @@ class ClientData {
             crash_exception_information_address),
         non_crash_exception_information_address_(
             non_crash_exception_information_address),
-        debug_critical_section_address_(debug_critical_section_address) {
+        debug_critical_section_address_(debug_critical_section_address),
+		crash_dump_callback_(crash_dump_callback) {
     RegisterThreadPoolWaits(crash_dump_request_callback,
                             non_crash_dump_request_callback,
                             process_end_callback);
@@ -169,6 +177,8 @@ class ClientData {
     return debug_critical_section_address_;
   }
   HANDLE process() const { return process_.get(); }
+
+  OnCrashDumpEventCallback crash_dump_callback() const { return crash_dump_callback_; }
 
  private:
   void RegisterThreadPoolWaits(
@@ -233,6 +243,7 @@ class ClientData {
   WinVMAddress crash_exception_information_address_;
   WinVMAddress non_crash_exception_information_address_;
   WinVMAddress debug_critical_section_address_;
+  OnCrashDumpEventCallback crash_dump_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientData);
 };
@@ -242,13 +253,14 @@ class ClientData {
 ExceptionHandlerServer::Delegate::~Delegate() {
 }
 
-ExceptionHandlerServer::ExceptionHandlerServer(bool persistent)
+ExceptionHandlerServer::ExceptionHandlerServer(bool persistent, OnCrashDumpEventCallback crash_dump_callback)
     : pipe_name_(),
       port_(CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1)),
       first_pipe_instance_(),
       clients_lock_(),
       clients_(),
-      persistent_(persistent) {
+      persistent_(persistent),
+	  crash_dump_callback_(crash_dump_callback) {
 }
 
 ExceptionHandlerServer::~ExceptionHandlerServer() {
@@ -299,7 +311,8 @@ void ExceptionHandlerServer::InitializeWithInheritedDataForInitialClient(
         initial_client_data.debug_critical_section_address(),
         &OnCrashDumpEvent,
         &OnNonCrashDumpEvent,
-        &OnProcessEnd);
+        &OnProcessEnd,
+		crash_dump_callback_);
     clients_.insert(client);
   }
 }
@@ -325,7 +338,8 @@ void ExceptionHandlerServer::Run(Delegate* delegate) {
                                          delegate,
                                          &clients_lock_,
                                          &clients_,
-                                         shutdown_token);
+                                         shutdown_token,
+										 crash_dump_callback_);
     thread_handles[i].reset(
         CreateThread(nullptr, 0, &PipeServiceProc, context, 0, nullptr));
     PCHECK(thread_handles[i].is_valid()) << "CreateThread";
@@ -492,7 +506,8 @@ bool ExceptionHandlerServer::ServiceClientConnection(
         message.registration.critical_section_address,
         &OnCrashDumpEvent,
         &OnNonCrashDumpEvent,
-        &OnProcessEnd);
+        &OnProcessEnd,
+		service_context.crash_dump_callback());
     service_context.clients()->insert(client);
   }
 
@@ -547,7 +562,10 @@ void __stdcall ExceptionHandlerServer::OnCrashDumpEvent(void* ctx, BOOLEAN) {
       client->crash_exception_information_address(),
       client->debug_critical_section_address());
 
-  SafeTerminateProcess(client->process(), exit_code);
+  if (client->crash_dump_callback() != nullptr)
+    client->crash_dump_callback()(client->process(), exit_code);
+  else
+    SafeTerminateProcess(client->process(), exit_code);
 }
 
 // static

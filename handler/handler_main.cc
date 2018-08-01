@@ -414,7 +414,8 @@ void MonitorSelf(const Options& options) {
 
 int HandlerMain(int argc,
                 char* argv[],
-                const UserStreamDataSources* user_stream_sources) {
+                const UserStreamDataSources* user_stream_sources,
+				OnCrashDumpEventCallback crash_dump_callback) {
   InstallCrashHandler();
   CallMetricsRecordNormalExit metrics_record_normal_exit;
 
@@ -735,7 +736,7 @@ int HandlerMain(int argc,
   if (!SetProcessShutdownParameters(0x100, SHUTDOWN_NORETRY))
     PLOG(ERROR) << "SetProcessShutdownParameters";
 
-  ExceptionHandlerServer exception_handler_server(!options.pipe_name.empty());
+  ExceptionHandlerServer exception_handler_server(!options.pipe_name.empty(), crash_dump_callback);
 
   if (!options.pipe_name.empty()) {
     exception_handler_server.SetPipeName(base::UTF8ToUTF16(options.pipe_name));
